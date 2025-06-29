@@ -23,7 +23,7 @@ export const RecentDebates = () => {
         .range(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE - 1);
 
       if (searchTerm) {
-        query = query.or(`anforande.ilike.%${searchTerm}%,talare.ilike.%${searchTerm}%,rubrik.ilike.%${searchTerm}%`);
+        query = query.or(`text.ilike.%${searchTerm}%,talare.ilike.%${searchTerm}%,rubrik.ilike.%${searchTerm}%`);
       }
 
       const { data } = await query;
@@ -102,20 +102,20 @@ export const RecentDebates = () => {
                         {debate.parti}
                       </Badge>
                     )}
-                    {debate.dok_datum && (
+                    {debate.datum && (
                       <div className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
-                        <span>{new Date(debate.dok_datum).toLocaleDateString('sv-SE')}</span>
+                        <span>{new Date(debate.datum).toLocaleDateString('sv-SE')}</span>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              {debate.anforande && (
+              {debate.text && (
                 <div className="bg-gray-50 rounded-md p-4 mb-4">
                   <p className="text-gray-700 leading-relaxed">
-                    {truncateText(debate.anforande, 300)}
+                    {truncateText(debate.text, 300)}
                   </p>
                 </div>
               )}

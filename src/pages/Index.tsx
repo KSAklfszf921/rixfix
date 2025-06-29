@@ -150,7 +150,7 @@ const Index = () => {
                         <p className="font-medium text-gray-900">{debate.talare}</p>
                         <p className="text-sm text-gray-600">{debate.parti} • {debate.dok_titel}</p>
                         <p className="text-xs text-gray-500 mt-1">
-                          {debate.dok_datum ? new Date(debate.dok_datum).toLocaleDateString('sv-SE') : 'Okänt datum'}
+                          {debate.datum ? new Date(debate.datum).toLocaleDateString('sv-SE') : 'Okänt datum'}
                         </p>
                       </div>
                     ))}

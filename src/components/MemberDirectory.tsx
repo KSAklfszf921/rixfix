@@ -112,7 +112,7 @@ export const MemberDirectory = () => {
             <div key={member.iid} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
               <div className="flex items-start space-x-3">
                 <Avatar className="h-12 w-12">
-                  <AvatarImage src={member.bild_url_80 || undefined} alt={`${member.tilltalsnamn} ${member.efternamn}`} />
+                  <AvatarImage src={member.bild_url || undefined} alt={`${member.tilltalsnamn} ${member.efternamn}`} />
                   <AvatarFallback className="bg-blue-100 text-blue-800">
                     {member.tilltalsnamn?.[0]}{member.efternamn?.[0]}
                   </AvatarFallback>
