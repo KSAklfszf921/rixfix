@@ -1,5 +1,4 @@
-
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,13 +29,46 @@ export const AdminPanel = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [currentSync, setCurrentSync] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const queryAbortControllerRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Fetch admin stats
+  // Cleanup function för att avbryta alla pågående operationer
+  const cleanupAllOperations = () => {
+    console.log('Cleaning up all operations...');
+    
+    // Avbryt Edge Function-anrop
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
+    // Avbryt Supabase-queries
+    if (queryAbortControllerRef.current) {
+      queryAbortControllerRef.current.abort();
+      queryAbortControllerRef.current = null;
+    }
+    
+    // Avbryt alla pågående queries
+    queryClient.cancelQueries();
+    
+    setIsRunning(false);
+    setCurrentSync(null);
+  };
+
+  // Cleanup vid component unmount
+  useEffect(() => {
+    return () => {
+      cleanupAllOperations();
+    };
+  }, []);
+
+  // Fetch admin stats med abort signal
   const { data: stats } = useQuery({
     queryKey: ['admin-stats'],
     queryFn: async ({ signal }) => {
+      console.log('Fetching admin stats...');
+      
       const [membersResult, debatesResult, documentsResult, votesResult] = await Promise.all([
         supabase.from('ledamoter').select('*', { count: 'exact' }).abortSignal(signal),
         supabase.from('anforanden').select('*', { count: 'exact' }).abortSignal(signal),
@@ -51,26 +83,30 @@ export const AdminPanel = () => {
         votes: votesResult.count || 0
       };
     },
-    refetchInterval: isRunning ? 5000 : false
+    refetchInterval: isRunning ? 5000 : false,
+    retry: false
   });
 
-  // Fetch sync state
+  // Fetch sync state med abort signal
   const { data: syncStates } = useQuery({
     queryKey: ['sync-states'],
     queryFn: async ({ signal }) => {
+      console.log('Fetching sync states...');
       const { data } = await supabase
         .from('sync_state')
         .select('*')
         .abortSignal(signal);
       return data || [];
     },
-    refetchInterval: 5000
+    refetchInterval: 5000,
+    retry: false
   });
 
-  // Fetch sync logs
+  // Fetch sync logs med abort signal
   const { data: syncLogs, refetch: refetchLogs } = useQuery({
     queryKey: ['sync-logs'],
     queryFn: async ({ signal }) => {
+      console.log('Fetching sync logs...');
       const { data } = await supabase
         .from('api_sync_log')
         .select('*')
@@ -79,23 +115,26 @@ export const AdminPanel = () => {
         .abortSignal(signal);
       return data || [];
     },
-    refetchInterval: isRunning ? 3000 : false
+    refetchInterval: isRunning ? 3000 : false,
+    retry: false
   });
 
-  // Fetch real-time sync progress
+  // Fetch real-time sync progress med abort signal
   const { data: syncProgress } = useQuery({
     queryKey: ['sync-progress'],
     queryFn: async ({ signal }) => {
+      console.log('Fetching sync progress...');
       const { data } = await supabase
         .from('sync_progress')
         .select('*')
         .order('started_at', { ascending: false })
         .limit(1)
         .abortSignal(signal)
-        .single();
+        .maybeSingle();
       return data;
     },
-    refetchInterval: isRunning ? 2000 : false
+    refetchInterval: isRunning ? 2000 : false,
+    retry: false
   });
 
   const getSyncState = (syncType: string) => {
@@ -104,20 +143,34 @@ export const AdminPanel = () => {
 
   const startBatchSync = async (syncType: string) => {
     try {
+      // Avbryt alla tidigare operationer först
+      cleanupAllOperations();
+      
       setIsRunning(true);
       setCurrentSync(syncType);
       
+      // Skapa ny AbortController för denna operation
       abortControllerRef.current = new AbortController();
+      queryAbortControllerRef.current = new AbortController();
       
-      console.log(`Starting batch sync for ${syncType}...`);
+      console.log(`Starting batch sync for ${syncType} with proper abort handling...`);
       
+      // Anropa Edge Function med timeout och abort signal
+      const timeoutId = setTimeout(() => {
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          console.log('Operation timed out after 5 minutes');
+        }
+      }, 300000); // 5 minuter timeout
+
       const { data, error } = await supabase.functions.invoke('riksdag-api-sync', {
         body: { 
           syncType,
-          batchSize: 50,
-          signal: abortControllerRef.current.signal 
+          batchSize: 50
         }
       });
+
+      clearTimeout(timeoutId);
 
       if (error) {
         console.error('Batch sync error:', error);
@@ -127,26 +180,28 @@ export const AdminPanel = () => {
           variant: "destructive",
         });
       } else {
-        console.log('Batch sync completed:', data);
+        console.log('Batch sync completed successfully:', data);
         toast({
           title: "Batch hämtad",
           description: `Hämtade ${data.recordsProcessed} poster för ${syncType}.`,
         });
       }
       
+      // Invalidera queries för att uppdatera UI
       await queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
       await queryClient.invalidateQueries({ queryKey: ['sync-states'] });
       await refetchLogs();
       
     } catch (error: any) {
+      console.error('Batch sync error:', error);
+      
       if (error.name === 'AbortError') {
         toast({
           title: "Batch-synkronisering avbruten",
-          description: `${syncType} hämtning avbröts av användaren.`,
+          description: `${syncType} hämtning avbröts.`,
           variant: "destructive",
         });
       } else {
-        console.error('Batch sync error:', error);
         toast({
           title: "Batch-synkroniseringsfel",
           description: `Ett oväntat fel inträffade: ${error.message}`,
@@ -157,11 +212,14 @@ export const AdminPanel = () => {
       setIsRunning(false);
       setCurrentSync(null);
       abortControllerRef.current = null;
+      queryAbortControllerRef.current = null;
     }
   };
 
   const resetSyncState = async (syncType: string) => {
     try {
+      console.log(`Resetting sync state for ${syncType}...`);
+      
       const { error } = await supabase
         .from('sync_state')
         .update({ 
@@ -173,12 +231,14 @@ export const AdminPanel = () => {
         .eq('sync_type', syncType);
 
       if (error) {
+        console.error('Reset error:', error);
         toast({
           title: "Fel vid återställning",
           description: "Kunde inte återställa synkroniseringsstatus.",
           variant: "destructive",
         });
       } else {
+        console.log(`Successfully reset sync state for ${syncType}`);
         toast({
           title: "Återställt",
           description: `Synkroniseringsstatus för ${syncType} har återställts.`,
@@ -187,17 +247,21 @@ export const AdminPanel = () => {
       }
     } catch (error) {
       console.error('Reset error:', error);
+      toast({
+        title: "Fel vid återställning",
+        description: "Ett oväntat fel inträffade vid återställning.",
+        variant: "destructive",
+      });
     }
   };
 
   const abortSync = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      toast({
-        title: "Avbryter batch-hämtning",
-        description: "Batch-hämtningen avbryts...",
-      });
-    }
+    console.log('User requested sync abort...');
+    cleanupAllOperations();
+    toast({
+      title: "Avbryter batch-hämtning",
+      description: "Alla pågående operationer avbryts...",
+    });
   };
 
   const getStatusIcon = (status: string) => {
@@ -226,6 +290,28 @@ export const AdminPanel = () => {
 
   return (
     <div className="space-y-6">
+      {/* Emergency stop button */}
+      {isRunning && (
+        <Card className="border-red-200 bg-red-50">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2 text-red-700">
+              <AlertCircle className="h-5 w-5" />
+              Pågående operation - Nödstopp tillgänglig
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Button 
+              variant="destructive" 
+              onClick={abortSync}
+              className="w-full"
+            >
+              <Square className="h-4 w-4 mr-2" />
+              AVBRYT ALLA OPERATIONER
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Batch-kontroller */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
