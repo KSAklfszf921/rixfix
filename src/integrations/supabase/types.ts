@@ -330,6 +330,39 @@ export type Database = {
         }
         Relationships: []
       }
+      sync_state: {
+        Row: {
+          created_at: string | null
+          id: number
+          is_complete: boolean | null
+          last_offset: number | null
+          last_sync_date: string | null
+          sync_type: string
+          total_fetched: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: number
+          is_complete?: boolean | null
+          last_offset?: number | null
+          last_sync_date?: string | null
+          sync_type: string
+          total_fetched?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: number
+          is_complete?: boolean | null
+          last_offset?: number | null
+          last_sync_date?: string | null
+          sync_type?: string
+          total_fetched?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       uppdrag: {
         Row: {
           created_at: string | null

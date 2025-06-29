@@ -1,3 +1,4 @@
+
 import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,7 +21,9 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  RotateCcw,
+  ArrowRight
 } from "lucide-react";
 
 export const AdminPanel = () => {
@@ -49,6 +52,19 @@ export const AdminPanel = () => {
       };
     },
     refetchInterval: isRunning ? 5000 : false
+  });
+
+  // Fetch sync state
+  const { data: syncStates } = useQuery({
+    queryKey: ['sync-states'],
+    queryFn: async ({ signal }) => {
+      const { data } = await supabase
+        .from('sync_state')
+        .select('*')
+        .abortSignal(signal);
+      return data || [];
+    },
+    refetchInterval: 5000
   });
 
   // Fetch sync logs
@@ -82,52 +98,57 @@ export const AdminPanel = () => {
     refetchInterval: isRunning ? 2000 : false
   });
 
-  const startSync = async (syncType: string) => {
+  const getSyncState = (syncType: string) => {
+    return syncStates?.find(state => state.sync_type === syncType);
+  };
+
+  const startBatchSync = async (syncType: string) => {
     try {
       setIsRunning(true);
       setCurrentSync(syncType);
       
-      // Create new AbortController for this sync operation
       abortControllerRef.current = new AbortController();
       
-      console.log(`Starting ${syncType} sync...`);
+      console.log(`Starting batch sync for ${syncType}...`);
       
       const { data, error } = await supabase.functions.invoke('riksdag-api-sync', {
         body: { 
           syncType,
+          batchSize: 50,
           signal: abortControllerRef.current.signal 
         }
       });
 
       if (error) {
-        console.error('Sync error:', error);
+        console.error('Batch sync error:', error);
         toast({
-          title: "Synkroniseringsfel",
-          description: `Ett fel inträffade vid synkronisering av ${syncType}: ${error.message}`,
+          title: "Batch-synkroniseringsfel",
+          description: `Ett fel inträffade vid hämtning av ${syncType}: ${error.message}`,
           variant: "destructive",
         });
       } else {
-        console.log('Sync completed:', data);
+        console.log('Batch sync completed:', data);
         toast({
-          title: "Synkronisering slutförd",
-          description: `${syncType} synkronisering slutförd framgångsrikt.`,
+          title: "Batch hämtad",
+          description: `Hämtade ${data.recordsProcessed} poster för ${syncType}.`,
         });
       }
       
       await queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
+      await queryClient.invalidateQueries({ queryKey: ['sync-states'] });
       await refetchLogs();
       
     } catch (error: any) {
       if (error.name === 'AbortError') {
         toast({
-          title: "Synkronisering avbruten",
-          description: `${syncType} synkronisering avbröts av användaren.`,
+          title: "Batch-synkronisering avbruten",
+          description: `${syncType} hämtning avbröts av användaren.`,
           variant: "destructive",
         });
       } else {
-        console.error('Sync error:', error);
+        console.error('Batch sync error:', error);
         toast({
-          title: "Synkroniseringsfel",
+          title: "Batch-synkroniseringsfel",
           description: `Ett oväntat fel inträffade: ${error.message}`,
           variant: "destructive",
         });
@@ -139,12 +160,42 @@ export const AdminPanel = () => {
     }
   };
 
+  const resetSyncState = async (syncType: string) => {
+    try {
+      const { error } = await supabase
+        .from('sync_state')
+        .update({ 
+          last_offset: 0, 
+          total_fetched: 0, 
+          is_complete: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('sync_type', syncType);
+
+      if (error) {
+        toast({
+          title: "Fel vid återställning",
+          description: "Kunde inte återställa synkroniseringsstatus.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Återställt",
+          description: `Synkroniseringsstatus för ${syncType} har återställts.`,
+        });
+        await queryClient.invalidateQueries({ queryKey: ['sync-states'] });
+      }
+    } catch (error) {
+      console.error('Reset error:', error);
+    }
+  };
+
   const abortSync = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       toast({
-        title: "Avbryter synkronisering",
-        description: "Synkroniseringen avbryts...",
+        title: "Avbryter batch-hämtning",
+        description: "Batch-hämtningen avbryts...",
       });
     }
   };
@@ -175,127 +226,69 @@ export const AdminPanel = () => {
 
   return (
     <div className="space-y-6">
-      {/* Huvudkontroller */}
+      {/* Batch-kontroller */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              Ledamöter
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-2xl font-bold">{stats?.members?.toLocaleString() || 0}</div>
-            <Button 
-              size="sm" 
-              className="w-full" 
-              onClick={() => startSync('members')}
-              disabled={isRunning}
-            >
-              {isRunning && currentSync === 'members' ? (
-                <>
-                  <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                  Synkar...
-                </>
-              ) : (
-                <>
-                  <Play className="h-3 w-3 mr-1" />
-                  Synka
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <MessageSquare className="h-4 w-4" />
-              Anföranden
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-2xl font-bold">{stats?.debates?.toLocaleString() || 0}</div>
-            <Button 
-              size="sm" 
-              className="w-full" 
-              onClick={() => startSync('debates')}
-              disabled={isRunning}
-            >
-              {isRunning && currentSync === 'debates' ? (
-                <>
-                  <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                  Synkar...
-                </>
-              ) : (
-                <>
-                  <Play className="h-3 w-3 mr-1" />
-                  Synka
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Dokument
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-2xl font-bold">{stats?.documents?.toLocaleString() || 0}</div>
-            <Button 
-              size="sm" 
-              className="w-full" 
-              onClick={() => startSync('documents')}
-              disabled={isRunning}
-            >
-              {isRunning && currentSync === 'documents' ? (
-                <>
-                  <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                  Synkar...
-                </>
-              ) : (
-                <>
-                  <Play className="h-3 w-3 mr-1" />
-                  Synka
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Vote className="h-4 w-4" />
-              Voteringar
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-2xl font-bold">{stats?.votes?.toLocaleString() || 0}</div>
-            <Button 
-              size="sm" 
-              className="w-full" 
-              onClick={() => startSync('votes')}
-              disabled={isRunning}
-            >
-              {isRunning && currentSync === 'votes' ? (
-                <>
-                  <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                  Synkar...
-                </>
-              ) : (
-                <>
-                  <Play className="h-3 w-3 mr-1" />
-                  Synka
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
+        {[
+          { type: 'members', icon: Users, title: 'Ledamöter', count: stats?.members },
+          { type: 'debates', icon: MessageSquare, title: 'Anföranden', count: stats?.debates },
+          { type: 'documents', icon: FileText, title: 'Dokument', count: stats?.documents },
+          { type: 'votes', icon: Vote, title: 'Voteringar', count: stats?.votes }
+        ].map(({ type, icon: Icon, title, count }) => {
+          const syncState = getSyncState(type);
+          return (
+            <Card key={type}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon className="h-4 w-4" />
+                  {title}
+                </CardTitle>
+                <div className="space-y-1">
+                  <div className="text-2xl font-bold">{count?.toLocaleString() || 0}</div>
+                  {syncState && (
+                    <div className="text-xs text-gray-500">
+                      Hämtade: {syncState.total_fetched} | Offset: {syncState.last_offset}
+                      {syncState.is_complete && (
+                        <Badge variant="outline" className="ml-2 text-xs">
+                          Komplett
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex gap-2">
+                  <Button 
+                    size="sm" 
+                    className="flex-1" 
+                    onClick={() => startBatchSync(type)}
+                    disabled={isRunning}
+                  >
+                    {isRunning && currentSync === type ? (
+                      <>
+                        <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                        Hämtar...
+                      </>
+                    ) : (
+                      <>
+                        <ArrowRight className="h-3 w-3 mr-1" />
+                        Nästa 50
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={() => resetSyncState(type)}
+                    disabled={isRunning}
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Avbryt-kontroller */}
@@ -304,10 +297,10 @@ export const AdminPanel = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Activity className="h-5 w-5 text-orange-600" />
-              Pågående synkronisering
+              Pågående batch-hämtning
             </CardTitle>
             <CardDescription>
-              Synkroniserar {currentSync}... Du kan avbryta operationen nedan.
+              Hämtar nästa batch för {currentSync}... Du kan avbryta operationen nedan.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -328,21 +321,21 @@ export const AdminPanel = () => {
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm">
                     <Square className="h-3 w-3 mr-1" />
-                    Avbryt synkronisering
+                    Avbryt hämtning
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Avbryt synkronisering?</AlertDialogTitle>
+                    <AlertDialogTitle>Avbryt batch-hämtning?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Är du säker på att du vill avbryta den pågående synkroniseringen? 
-                      Detta kan leda till att data inte är komplett.
+                      Är du säker på att du vill avbryta den pågående batch-hämtningen? 
+                      Du kan fortsätta från där du slutade nästa gång.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Avbryt</AlertDialogCancel>
                     <AlertDialogAction onClick={abortSync}>
-                      Ja, avbryt synkronisering
+                      Ja, avbryt hämtning
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -357,10 +350,10 @@ export const AdminPanel = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
-            Senaste synkroniseringar
+            Senaste batch-hämtningar
           </CardTitle>
           <CardDescription>
-            Historik över API-synkroniseringar med Riksdagens öppna data
+            Historik över API-hämtningar från Riksdagens öppna data (50 poster åt gången)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -399,7 +392,7 @@ export const AdminPanel = () => {
             {!syncLogs?.length && (
               <div className="text-center py-8 text-gray-500">
                 <Database className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                <p>Inga synkroniseringar genomförda ännu</p>
+                <p>Inga batch-hämtningar genomförda ännu</p>
               </div>
             )}
           </div>
