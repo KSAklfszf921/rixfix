@@ -254,10 +254,11 @@ serve(async (req) => {
                   bild_url: member.bild_url_192,
                   senast_uppdaterad: new Date().toISOString()
                 })
+            }
             
             recordsProcessed = members.length
           }
-          break
+          break;
 
         case 'debates':
           if (data.anforandelista?.anforande) {
@@ -283,10 +284,11 @@ serve(async (req) => {
                   protokoll_url_xml: debate.protokoll_url_xml,
                   relaterat_dokument_url: debate.relaterat_dokument_url
                 })
+            }
             
             recordsProcessed = debates.length
           }
-          break
+          break;
 
         case 'documents':
           if (data.dokumentlista?.dokument) {
@@ -311,10 +313,11 @@ serve(async (req) => {
                   relaterat_id: doc.relaterat_id,
                   hangar_id: doc.hangar_id
                 })
+            }
             
             recordsProcessed = documents.length
           }
-          break
+          break;
 
         case 'votes':
           if (data.voteringlista?.votering) {
@@ -336,10 +339,11 @@ serve(async (req) => {
                   votering_datum: vote.votering_datum,
                   dok_id: vote.dok_id
                 })
+            }
             
             recordsProcessed = votes.length
           }
-          break
+          break;
       }
 
       // Update sync state
