@@ -101,6 +101,63 @@ export type Database = {
         }
         Relationships: []
       }
+      batch_configs: {
+        Row: {
+          batch_size: number | null
+          created_at: string | null
+          date_from: string | null
+          date_to: string | null
+          endpoint: string
+          filters: Json | null
+          id: number
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          batch_size?: number | null
+          created_at?: string | null
+          date_from?: string | null
+          date_to?: string | null
+          endpoint: string
+          filters?: Json | null
+          id?: number
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          batch_size?: number | null
+          created_at?: string | null
+          date_from?: string | null
+          date_to?: string | null
+          endpoint?: string
+          filters?: Json | null
+          id?: number
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      doktyp_kodlista: {
+        Row: {
+          beskrivning: string | null
+          created_at: string | null
+          kod: string
+          namn: string
+        }
+        Insert: {
+          beskrivning?: string | null
+          created_at?: string | null
+          kod: string
+          namn: string
+        }
+        Update: {
+          beskrivning?: string | null
+          created_at?: string | null
+          kod?: string
+          namn?: string
+        }
+        Relationships: []
+      }
       dokument: {
         Row: {
           created_at: string | null
@@ -258,6 +315,24 @@ export type Database = {
           },
         ]
       }
+      parti_kodlista: {
+        Row: {
+          created_at: string | null
+          kod: string
+          namn: string
+        }
+        Insert: {
+          created_at?: string | null
+          kod: string
+          namn: string
+        }
+        Update: {
+          created_at?: string | null
+          kod?: string
+          namn?: string
+        }
+        Relationships: []
+      }
       sync_config: {
         Row: {
           created_at: string | null
@@ -332,31 +407,43 @@ export type Database = {
       }
       sync_state: {
         Row: {
+          api_endpoint: string | null
           created_at: string | null
+          filter_params: Json | null
           id: number
           is_complete: boolean | null
+          last_error: string | null
           last_offset: number | null
           last_sync_date: string | null
+          retry_count: number | null
           sync_type: string
           total_fetched: number | null
           updated_at: string | null
         }
         Insert: {
+          api_endpoint?: string | null
           created_at?: string | null
+          filter_params?: Json | null
           id?: number
           is_complete?: boolean | null
+          last_error?: string | null
           last_offset?: number | null
           last_sync_date?: string | null
+          retry_count?: number | null
           sync_type: string
           total_fetched?: number | null
           updated_at?: string | null
         }
         Update: {
+          api_endpoint?: string | null
           created_at?: string | null
+          filter_params?: Json | null
           id?: number
           is_complete?: boolean | null
+          last_error?: string | null
           last_offset?: number | null
           last_sync_date?: string | null
+          retry_count?: number | null
           sync_type?: string
           total_fetched?: number | null
           updated_at?: string | null
@@ -406,6 +493,42 @@ export type Database = {
             referencedColumns: ["iid"]
           },
         ]
+      }
+      utskott_kodlista: {
+        Row: {
+          created_at: string | null
+          kod: string
+          namn: string
+        }
+        Insert: {
+          created_at?: string | null
+          kod: string
+          namn: string
+        }
+        Update: {
+          created_at?: string | null
+          kod?: string
+          namn?: string
+        }
+        Relationships: []
+      }
+      valkrets_kodlista: {
+        Row: {
+          created_at: string | null
+          kod: string
+          namn: string
+        }
+        Insert: {
+          created_at?: string | null
+          kod: string
+          namn: string
+        }
+        Update: {
+          created_at?: string | null
+          kod?: string
+          namn?: string
+        }
+        Relationships: []
       }
       voteringar: {
         Row: {

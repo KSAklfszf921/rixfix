@@ -1,578 +1,419 @@
 
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-interface SyncRequest {
-  syncType: string;
-  batchSize?: number;
 }
 
-// API-konfiguration baserad på Riksdagens öppna data dokumentation
-const RIKSDAG_API_CONFIG = {
+interface RiksdagApiConfig {
+  baseUrl: string;
+  endpoints: {
+    [key: string]: string;
+  };
+}
+
+const API_CONFIG: RiksdagApiConfig = {
   baseUrl: 'https://data.riksdag.se',
   endpoints: {
-    members: '/personlista/?format=json&utformat=utokad',
-    debates: '/anforandelista/?format=json',
-    documents: '/dokumentlista/?format=json',
-    votes: '/voteringlista/?format=json'
-  },
-  // Riksdagens API stöder inte offset/limit direkt, så vi hanterar det lokalt
-  maxRetries: 3,
-  timeout: 60000 // 60 sekunder timeout per request
+    members: '/personlista/?iid=&fnamn=&enamn=&f_ar=&kn=&parti=&valkrets=&rdlstatus=&org=&utformat=json&termlista=',
+    debates: '/anforande/?rm=&bet=&punkt=&dok_id=&anf_id=&talare=&parti=&anforandetyp=&anfnr=&anf_datum_from=&anf_datum_tom=&kammaraktivitet=&anf_sekunder=&anf_klockslag_from=&anf_klockslag_tom=&anf_video=&debatt=&utformat=json&a_sz=50',
+    documents: '/dokumentlista/?sok=&doktyp=&rm=&from=&tom=&ts=&bet=&tempbet=&nr=&org=&iid=&webbtv=&talare=&exakt=&planering=&sort=datum&sortorder=desc&rapport=&utformat=json&a_sz=50',
+    votes: '/votering/?rm=&bet=&punkt=&valkrets=&rost=&iid=&sz=50&utformat=json'
+  }
 };
 
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-);
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  baseDelay: 1000,
+  maxDelay: 10000,
+  backoffMultiplier: 2
+};
+
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function makeRiksdagRequest(url: string, retryCount = 0): Promise<any> {
+  try {
+    console.log(`Making request to: ${url} (attempt ${retryCount + 1})`);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Riksdagskoll/1.0 (Educational Purpose)',
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        // Rate limited - exponential backoff
+        const delay = Math.min(
+          RETRY_CONFIG.baseDelay * Math.pow(RETRY_CONFIG.backoffMultiplier, retryCount),
+          RETRY_CONFIG.maxDelay
+        );
+        console.log(`Rate limited, waiting ${delay}ms before retry`);
+        await sleep(delay);
+        
+        if (retryCount < RETRY_CONFIG.maxRetries) {
+          return makeRiksdagRequest(url, retryCount + 1);
+        }
+        throw new Error(`Rate limited after ${RETRY_CONFIG.maxRetries} retries`);
+      }
+      
+      if (response.status === 413) {
+        throw new Error('ResponseTooLargeError: Query returned too much data. Try reducing batch size or adding more filters.');
+      }
+      
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data || (data.dokumentlista?.dokument?.length === 0 && data.personlista?.person?.length === 0 && data.anforandelista?.anforande?.length === 0 && data.voteringlista?.votering?.length === 0)) {
+      console.log('Empty response received');
+      return { isEmpty: true, data };
+    }
+
+    return { isEmpty: false, data };
+  } catch (error) {
+    console.error(`Request failed:`, error);
+    
+    if (retryCount < RETRY_CONFIG.maxRetries && !error.message.includes('ResponseTooLargeError')) {
+      const delay = Math.min(
+        RETRY_CONFIG.baseDelay * Math.pow(RETRY_CONFIG.backoffMultiplier, retryCount),
+        RETRY_CONFIG.maxDelay
+      );
+      console.log(`Retrying in ${delay}ms...`);
+      await sleep(delay);
+      return makeRiksdagRequest(url, retryCount + 1);
+    }
+    
+    throw error;
+  }
+}
+
+function buildApiUrl(syncType: string, filters: any = {}, offset = 0, batchSize = 50): string {
+  const baseEndpoint = API_CONFIG.endpoints[syncType];
+  if (!baseEndpoint) {
+    throw new Error(`Unknown sync type: ${syncType}`);
+  }
+
+  let url = `${API_CONFIG.baseUrl}${baseEndpoint}`;
+  
+  // Add pagination
+  if (url.includes('sz=')) {
+    url = url.replace(/sz=\d+/, `sz=${batchSize}`);
+  } else if (url.includes('a_sz=')) {
+    url = url.replace(/a_sz=\d+/, `a_sz=${batchSize}`);
+  }
+  
+  // Add offset/page parameter
+  if (offset > 0) {
+    const page = Math.floor(offset / batchSize) + 1;
+    url += `&p=${page}`;
+  }
+
+  // Apply filters
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value && value !== '') {
+        // Handle date filters
+        if (key.includes('_from') || key.includes('_tom')) {
+          url = url.replace(new RegExp(`${key}=[^&]*`), `${key}=${value}`);
+        } else {
+          url += `&${key}=${encodeURIComponent(value)}`;
+        }
+      }
+    });
+  }
+
+  return url;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders })
   }
 
-  const abortController = new AbortController();
-  const syncSessionId = crypto.randomUUID();
-  
-  // Sätt upp timeout för hela operationen (5 minuter)
-  const timeoutId = setTimeout(() => {
-    console.log('Operation timeout reached, aborting...');
-    abortController.abort();
-  }, 300000);
-
   try {
-    const { syncType, batchSize = 50 }: SyncRequest = await req.json();
-    console.log(`Starting validated batch sync for: ${syncType}, batch size: ${batchSize}, session: ${syncSessionId}`);
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
 
-    // Validera syncType
-    if (!['members', 'debates', 'documents', 'votes'].includes(syncType)) {
-      throw new Error(`Invalid sync type: ${syncType}`);
+    const { syncType, batchSize = 50, filters = {}, preview = false } = await req.json()
+
+    if (!syncType) {
+      throw new Error('syncType is required')
     }
 
-    // Get current sync state med abort signal
-    const { data: syncState, error: stateError } = await supabase
-      .from('sync_state')
-      .select('*')
-      .eq('sync_type', syncType)
-      .abortSignal(abortController.signal)
-      .single();
-
-    if (stateError) {
-      console.error('Failed to get sync state:', stateError);
-      throw new Error(`Failed to get sync state: ${stateError.message}`);
-    }
-
-    // Check if sync is already complete
-    if (syncState.is_complete) {
-      clearTimeout(timeoutId);
-      return new Response(
-        JSON.stringify({ 
-          success: true, 
-          message: 'Sync already complete. Reset to continue.',
-          recordsProcessed: 0 
-        }),
-        { 
-          headers: { 
-            'Content-Type': 'application/json',
-            ...corsHeaders 
-          } 
-        }
-      );
-    }
-
-    // Log sync start med abort signal
-    const { error: logError } = await supabase
+    // Log start of sync
+    const { data: logEntry } = await supabaseClient
       .from('api_sync_log')
       .insert({
         sync_type: syncType,
         status: 'running',
-        started_at: new Date().toISOString(),
-        records_processed: 0
+        started_at: new Date().toISOString()
       })
-      .abortSignal(abortController.signal);
+      .select()
+      .single()
 
-    if (logError) {
-      console.error('Failed to log sync start:', logError);
-    }
-
-    // Initialize progress tracking med abort signal
-    await supabase
-      .from('sync_progress')
-      .insert({
-        sync_session_id: syncSessionId,
-        sync_type: syncType,
-        current_status: 'starting',
-        total_records: batchSize,
-        processed_records: 0,
-        failed_records: 0
-      })
-      .abortSignal(abortController.signal);
-
-    let totalProcessed = 0;
-    const startTime = Date.now();
+    const logId = logEntry?.id
 
     try {
-      console.log(`Processing ${syncType} with proper API validation...`);
+      // Get current sync state
+      const { data: syncState } = await supabaseClient
+        .from('sync_state')
+        .select('*')
+        .eq('sync_type', syncType)
+        .single()
+
+      const currentOffset = syncState?.last_offset || 0
       
-      switch (syncType) {
-        case 'members':
-          totalProcessed = await syncMembersBatch(abortController.signal, syncSessionId, batchSize, syncState.last_offset);
-          break;
-        case 'debates':
-          totalProcessed = await syncDebatesBatch(abortController.signal, syncSessionId, batchSize, syncState.last_offset);
-          break;
-        case 'documents':
-          totalProcessed = await syncDocumentsBatch(abortController.signal, syncSessionId, batchSize, syncState.last_offset);
-          break;
-        case 'votes':
-          totalProcessed = await syncVotesBatch(abortController.signal, syncSessionId, batchSize, syncState.last_offset);
-          break;
-        default:
-          throw new Error(`Unknown sync type: ${syncType}`);
+      // Build API URL
+      const apiUrl = buildApiUrl(syncType, filters, currentOffset, batchSize)
+      console.log(`Built API URL: ${apiUrl}`)
+
+      // If preview mode, just return the URL and estimated count
+      if (preview) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            preview: true,
+            apiUrl,
+            estimatedBatch: batchSize,
+            currentOffset,
+            filters
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
 
-      // Update sync state med abort signal
-      await supabase
+      // Make API request
+      const result = await makeRiksdagRequest(apiUrl)
+      
+      if (result.isEmpty) {
+        // Mark as complete if no more data
+        await supabaseClient
+          .from('sync_state')
+          .upsert({
+            sync_type: syncType,
+            is_complete: true,
+            last_sync_date: new Date().toISOString(),
+            api_endpoint: apiUrl,
+            filter_params: filters,
+            updated_at: new Date().toISOString()
+          })
+
+        await supabaseClient
+          .from('api_sync_log')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            records_processed: 0
+          })
+          .eq('id', logId)
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: 'No more data available',
+            recordsProcessed: 0,
+            isComplete: true
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Process the data based on sync type
+      let recordsProcessed = 0
+      const { data } = result
+
+      switch (syncType) {
+        case 'members':
+          if (data.personlista?.person) {
+            const members = Array.isArray(data.personlista.person) 
+              ? data.personlista.person 
+              : [data.personlista.person]
+            
+            for (const member of members) {
+              await supabaseClient
+                .from('ledamoter')
+                .upsert({
+                  iid: member.intressent_id,
+                  tilltalsnamn: member.tilltalsnamn,
+                  efternamn: member.efternamn,
+                  parti: member.parti,
+                  valkrets: member.valkrets,
+                  kon: member.kon,
+                  fodd_ar: member.fodd_ar ? parseInt(member.fodd_ar) : null,
+                  status: member.status,
+                  bild_url: member.bild_url_192,
+                  senast_uppdaterad: new Date().toISOString()
+                })
+            
+            recordsProcessed = members.length
+          }
+          break
+
+        case 'debates':
+          if (data.anforandelista?.anforande) {
+            const debates = Array.isArray(data.anforandelista.anforande) 
+              ? data.anforandelista.anforande 
+              : [data.anforandelista.anforande]
+            
+            for (const debate of debates) {
+              await supabaseClient
+                .from('anforanden')
+                .upsert({
+                  anforande_id: debate.dok_id + '_' + debate.anforande_nummer,
+                  intressent_id: debate.intressent_id,
+                  talare: debate.talare,
+                  parti: debate.parti,
+                  datum: debate.datum,
+                  anforandetyp: debate.anforandetyp,
+                  rubrik: debate.rubrik,
+                  text: debate.anforandetext,
+                  dok_titel: debate.dok_titel,
+                  kon: debate.kon,
+                  nummer: debate.anforande_nummer,
+                  protokoll_url_xml: debate.protokoll_url_xml,
+                  relaterat_dokument_url: debate.relaterat_dokument_url
+                })
+            
+            recordsProcessed = debates.length
+          }
+          break
+
+        case 'documents':
+          if (data.dokumentlista?.dokument) {
+            const documents = Array.isArray(data.dokumentlista.dokument) 
+              ? data.dokumentlista.dokument 
+              : [data.dokumentlista.dokument]
+            
+            for (const doc of documents) {
+              await supabaseClient
+                .from('dokument')
+                .upsert({
+                  dok_id: doc.dok_id,
+                  titel: doc.titel,
+                  doktyp: doc.doktyp,
+                  datum: doc.datum,
+                  status: doc.status,
+                  organ: doc.organ,
+                  rm: doc.rm,
+                  dokument_url_html: doc.dokument_url_html,
+                  dokument_url_pdf: doc.dokument_url_pdf,
+                  dokument_url_text: doc.dokument_url_text,
+                  relaterat_id: doc.relaterat_id,
+                  hangar_id: doc.hangar_id
+                })
+            
+            recordsProcessed = documents.length
+          }
+          break
+
+        case 'votes':
+          if (data.voteringlista?.votering) {
+            const votes = Array.isArray(data.voteringlista.votering) 
+              ? data.voteringlista.votering 
+              : [data.voteringlista.votering]
+            
+            for (const vote of votes) {
+              await supabaseClient
+                .from('voteringar')
+                .upsert({
+                  votering_id: vote.votering_id,
+                  intressent_id: vote.intressent_id,
+                  namn: vote.namn,
+                  parti: vote.parti,
+                  valkrets: vote.valkrets,
+                  rost: vote.rost,
+                  avser: vote.avser,
+                  votering_datum: vote.votering_datum,
+                  dok_id: vote.dok_id
+                })
+            
+            recordsProcessed = votes.length
+          }
+          break
+      }
+
+      // Update sync state
+      await supabaseClient
         .from('sync_state')
-        .update({
-          last_offset: syncState.last_offset + totalProcessed,
-          total_fetched: syncState.total_fetched + totalProcessed,
+        .upsert({
+          sync_type: syncType,
+          last_offset: currentOffset + recordsProcessed,
+          total_fetched: (syncState?.total_fetched || 0) + recordsProcessed,
           last_sync_date: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          is_complete: totalProcessed < batchSize
+          api_endpoint: apiUrl,
+          filter_params: filters,
+          retry_count: 0,
+          is_complete: recordsProcessed < batchSize,
+          updated_at: new Date().toISOString()
         })
-        .eq('sync_type', syncType)
-        .abortSignal(abortController.signal);
 
-      // Mark as completed
-      const endTime = Date.now();
-      const duration = endTime - startTime;
-
-      await supabase
+      // Update log
+      await supabaseClient
         .from('api_sync_log')
         .update({
           status: 'completed',
           completed_at: new Date().toISOString(),
-          records_processed: totalProcessed
+          records_processed: recordsProcessed
         })
-        .eq('sync_type', syncType)
-        .eq('status', 'running')
-        .abortSignal(abortController.signal);
-
-      await supabase
-        .from('sync_progress')
-        .update({
-          current_status: 'completed',
-          completed_at: new Date().toISOString(),
-          processed_records: totalProcessed
-        })
-        .eq('sync_session_id', syncSessionId)
-        .abortSignal(abortController.signal);
-
-      console.log(`Batch sync completed for ${syncType}: ${totalProcessed} records in ${duration}ms`);
-      clearTimeout(timeoutId);
+        .eq('id', logId)
 
       return new Response(
-        JSON.stringify({ 
-          success: true, 
-          syncType, 
-          recordsProcessed: totalProcessed,
-          duration,
-          isComplete: totalProcessed < batchSize
+        JSON.stringify({
+          success: true,
+          recordsProcessed,
+          totalFetched: (syncState?.total_fetched || 0) + recordsProcessed,
+          isComplete: recordsProcessed < batchSize,
+          apiUrl
         }),
-        { 
-          headers: { 
-            'Content-Type': 'application/json',
-            ...corsHeaders 
-          } 
-        }
-      );
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
 
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log(`Batch sync aborted for ${syncType}`);
-        
-        await supabase
+    } catch (error) {
+      console.error('Sync error:', error)
+      
+      // Update log with error
+      if (logId) {
+        await supabaseClient
           .from('api_sync_log')
           .update({
             status: 'failed',
             completed_at: new Date().toISOString(),
-            error_message: 'Batch-synkronisering avbruten',
-            records_processed: totalProcessed
+            error_message: error.message
           })
-          .eq('sync_type', syncType)
-          .eq('status', 'running');
-
-        await supabase
-          .from('sync_progress')
-          .update({
-            current_status: 'aborted',
-            completed_at: new Date().toISOString()
-          })
-          .eq('sync_session_id', syncSessionId);
-
-        clearTimeout(timeoutId);
-        return new Response(
-          JSON.stringify({ success: false, error: 'Batch sync aborted' }),
-          { 
-            status: 499,
-            headers: { 
-              'Content-Type': 'application/json',
-              ...corsHeaders 
-            } 
-          }
-        );
+          .eq('id', logId)
       }
 
-      throw error;
+      // Update sync state with error
+      await supabaseClient
+        .from('sync_state')
+        .upsert({
+          sync_type: syncType,
+          last_error: error.message,
+          retry_count: (syncState?.retry_count || 0) + 1,
+          updated_at: new Date().toISOString()
+        })
+
+      throw error
     }
 
-  } catch (error: any) {
-    console.error('Batch sync error:', error);
-    clearTimeout(timeoutId);
-    
-    // Update failed sync log
-    try {
-      await supabase
-        .from('api_sync_log')
-        .update({
-          status: 'failed',
-          completed_at: new Date().toISOString(),
-          error_message: error.message
-        })
-        .eq('sync_type', (await req.json()).syncType)
-        .eq('status', 'running');
-    } catch (logError) {
-      console.error('Failed to update error log:', logError);
-    }
-    
+  } catch (error) {
+    console.error('Function error:', error)
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error.message 
-      }),
+      JSON.stringify({ error: error.message }),
       { 
         status: 500,
-        headers: { 
-          'Content-Type': 'application/json',
-          ...corsHeaders 
-        } 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
-    );
+    )
   }
-});
-
-async function makeRiksdagApiRequest(url: string, signal: AbortSignal): Promise<any> {
-  console.log(`Making API request to: ${url}`);
-  
-  let lastError;
-  
-  for (let attempt = 1; attempt <= RIKSDAG_API_CONFIG.maxRetries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), RIKSDAG_API_CONFIG.timeout);
-      
-      // Kombinera signals
-      signal.addEventListener('abort', () => controller.abort());
-      
-      const response = await fetch(url, { 
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Riksdagskoll/1.0',
-          'Accept': 'application/json'
-        }
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      console.log(`API request successful on attempt ${attempt}`);
-      return data;
-      
-    } catch (error: any) {
-      lastError = error;
-      console.error(`API request attempt ${attempt} failed:`, error.message);
-      
-      if (error.name === 'AbortError' || signal.aborted) {
-        throw error;
-      }
-      
-      if (attempt < RIKSDAG_API_CONFIG.maxRetries) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-        console.log(`Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-  
-  throw lastError;
-}
-
-async function syncMembersBatch(signal: AbortSignal, sessionId: string, batchSize: number, offset: number): Promise<number> {
-  console.log(`Syncing members batch: offset=${offset}, limit=${batchSize}`);
-  
-  const url = `${RIKSDAG_API_CONFIG.baseUrl}${RIKSDAG_API_CONFIG.endpoints.members}`;
-  const data = await makeRiksdagApiRequest(url, signal);
-  
-  const allMembers = data?.personlista?.person || [];
-  console.log(`Retrieved ${allMembers.length} total members from API`);
-  
-  const members = allMembers.slice(offset, offset + batchSize);
-  
-  if (members.length === 0) {
-    console.log('No more members to process');
-    return 0;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      total_records: members.length,
-      current_status: `Processing members batch: ${offset}-${offset + members.length}`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  // Validera och mappa data enligt Riksdagens API-specifikation
-  const memberData = members.map((member: any) => ({
-    iid: member.intressent_id,
-    tilltalsnamn: member.tilltalsnamn,
-    efternamn: member.efternamn,
-    parti: member.parti,
-    valkrets: member.valkrets,
-    status: member.status,
-    kon: member.kon,
-    fodd_ar: member.fodd_ar ? parseInt(member.fodd_ar) : null,
-    bild_url: member.bild_url_192 || member.bild_url_80,
-    webbplats_url: member.webbsida_url
-  })).filter(member => member.iid); // Filtrera bort poster utan ID
-
-  console.log(`Processed ${memberData.length} valid members`);
-
-  const { error } = await supabase
-    .from('ledamoter')
-    .upsert(memberData, { onConflict: 'iid' })
-    .abortSignal(signal);
-
-  if (error) {
-    console.error('Failed to upsert members:', error);
-    throw error;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      processed_records: members.length,
-      current_status: `Completed members batch: ${members.length} records`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  return members.length;
-}
-
-async function syncDebatesBatch(signal: AbortSignal, sessionId: string, batchSize: number, offset: number): Promise<number> {
-  console.log(`Syncing debates batch: offset=${offset}, limit=${batchSize}`);
-  
-  const fromDate = new Date();
-  fromDate.setDate(fromDate.getDate() - 90);
-  const fromDateStr = fromDate.toISOString().split('T')[0];
-  
-  const url = `${RIKSDAG_API_CONFIG.baseUrl}${RIKSDAG_API_CONFIG.endpoints.debates}&from=${fromDateStr}`;
-  const data = await makeRiksdagApiRequest(url, signal);
-  
-  const allDebates = data?.anforandelista?.anforande || [];
-  console.log(`Retrieved ${allDebates.length} total debates from API`);
-  
-  const debates = allDebates.slice(offset, offset + batchSize);
-  
-  if (debates.length === 0) {
-    console.log('No more debates to process');
-    return 0;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      total_records: debates.length,
-      current_status: `Processing debates batch: ${offset}-${offset + debates.length}`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  const debateData = debates.map((debate: any) => ({
-    anforande_id: debate.anforande_id,
-    datum: debate.datum,
-    talare: debate.talare,
-    parti: debate.parti,
-    intressent_id: debate.intressent_id,
-    rubrik: debate.rubrik,
-    text: debate.anforandetext,
-    dok_titel: debate.dok_titel,
-    anforandetyp: debate.anforandetyp,
-    kon: debate.kon
-  })).filter(debate => debate.anforande_id);
-
-  console.log(`Processed ${debateData.length} valid debates`);
-
-  const { error } = await supabase
-    .from('anforanden')
-    .upsert(debateData, { onConflict: 'anforande_id' })
-    .abortSignal(signal);
-
-  if (error) {
-    console.error('Failed to upsert debates:', error);
-    throw error;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      processed_records: debates.length,
-      current_status: `Completed debates batch: ${debates.length} records`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  return debates.length;
-}
-
-async function syncDocumentsBatch(signal: AbortSignal, sessionId: string, batchSize: number, offset: number): Promise<number> {
-  console.log(`Syncing documents batch: offset=${offset}, limit=${batchSize}`);
-  
-  const fromDate = new Date();
-  fromDate.setDate(fromDate.getDate() - 90);
-  const fromDateStr = fromDate.toISOString().split('T')[0];
-  
-  const url = `${RIKSDAG_API_CONFIG.baseUrl}${RIKSDAG_API_CONFIG.endpoints.documents}&from=${fromDateStr}`;
-  const data = await makeRiksdagApiRequest(url, signal);
-  
-  const allDocuments = data?.dokumentlista?.dokument || [];
-  console.log(`Retrieved ${allDocuments.length} total documents from API`);
-  
-  const documents = allDocuments.slice(offset, offset + batchSize);
-  
-  if (documents.length === 0) {
-    console.log('No more documents to process');
-    return 0;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      total_records: documents.length,
-      current_status: `Processing documents batch: ${offset}-${offset + documents.length}`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  const documentData = documents.map((doc: any) => ({
-    dok_id: doc.dok_id,
-    titel: doc.titel,
-    doktyp: doc.doktyp,
-    rm: doc.rm,
-    datum: doc.datum,
-    organ: doc.organ,
-    dokument_url_html: doc.dokument_url_html,
-    dokument_url_pdf: doc.dokument_url_pdf,
-    dokument_url_text: doc.dokument_url_text,
-    status: doc.status
-  })).filter(doc => doc.dok_id);
-
-  console.log(`Processed ${documentData.length} valid documents`);
-
-  const { error } = await supabase
-    .from('dokument')
-    .upsert(documentData, { onConflict: 'dok_id' })
-    .abortSignal(signal);
-
-  if (error) {
-    console.error('Failed to upsert documents:', error);
-    throw error;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      processed_records: documents.length,
-      current_status: `Completed documents batch: ${documents.length} records`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  return documents.length;
-}
-
-async function syncVotesBatch(signal: AbortSignal, sessionId: string, batchSize: number, offset: number): Promise<number> {
-  console.log(`Syncing votes batch: offset=${offset}, limit=${batchSize}`);
-  
-  const fromDate = new Date();
-  fromDate.setDate(fromDate.getDate() - 90);
-  const fromDateStr = fromDate.toISOString().split('T')[0];
-  
-  const url = `${RIKSDAG_API_CONFIG.baseUrl}${RIKSDAG_API_CONFIG.endpoints.votes}&from=${fromDateStr}`;
-  const data = await makeRiksdagApiRequest(url, signal);
-  
-  const allVotes = data?.voteringlista?.votering || [];
-  console.log(`Retrieved ${allVotes.length} total votes from API`);
-  
-  const votes = allVotes.slice(offset, offset + batchSize);
-  
-  if (votes.length === 0) {
-    console.log('No more votes to process');
-    return 0;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      total_records: votes.length,
-      current_status: `Processing votes batch: ${offset}-${offset + votes.length}`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  const voteData = votes.map((vote: any) => ({
-    votering_id: vote.votering_id,
-    dok_id: vote.dok_id,
-    avser: vote.avser,
-    votering_datum: vote.datum,
-    namn: vote.namn,
-    parti: vote.parti,
-    valkrets: vote.valkrets,
-    rost: vote.rost,
-    intressent_id: vote.intressent_id
-  })).filter(vote => vote.votering_id && vote.intressent_id);
-
-  console.log(`Processed ${voteData.length} valid votes`);
-
-  const { error } = await supabase
-    .from('voteringar')
-    .upsert(voteData, { onConflict: 'votering_id,intressent_id' })
-    .abortSignal(signal);
-
-  if (error) {
-    console.error('Failed to upsert votes:', error);
-    throw error;
-  }
-
-  await supabase
-    .from('sync_progress')
-    .update({
-      processed_records: votes.length,
-      current_status: `Completed votes batch: ${votes.length} records`
-    })
-    .eq('sync_session_id', sessionId)
-    .abortSignal(signal);
-
-  return votes.length;
-}
+})
