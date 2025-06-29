@@ -14,14 +14,17 @@ import { toast } from "sonner";
 import { 
   Settings, 
   Play, 
-  Pause, 
   RefreshCw, 
   Database, 
   Clock, 
   CheckCircle, 
   XCircle, 
   AlertCircle,
-  Activity
+  Activity,
+  Users,
+  FileText,
+  Vote,
+  BookOpen
 } from "lucide-react";
 
 interface SyncConfig {
@@ -43,10 +46,19 @@ interface SyncLog {
   error_message: string | null;
 }
 
+interface SyncProgress {
+  sync_session_id: string;
+  sync_type: string;
+  total_records: number;
+  processed_records: number;
+  failed_records: number;
+  current_status: string;
+  updated_at: string;
+}
+
 export const AdminPanel = () => {
   const [selectedSyncType, setSelectedSyncType] = useState<string>("all");
-  const [syncProgress, setSyncProgress] = useState<{[key: string]: number}>({});
-  const [isLiveUpdating, setIsLiveUpdating] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   // Fetch sync configurations
@@ -61,7 +73,7 @@ export const AdminPanel = () => {
     }
   });
 
-  // Fetch sync logs with auto-refresh during sync
+  // Fetch sync logs
   const { data: syncLogs, isLoading: logsLoading } = useQuery({
     queryKey: ['sync-logs'],
     queryFn: async () => {
@@ -72,20 +84,31 @@ export const AdminPanel = () => {
         .limit(20);
       return data as SyncLog[];
     },
-    refetchInterval: isLiveUpdating ? 2000 : false
+    refetchInterval: 3000
   });
 
-  // Check for running syncs and enable live updates
-  useEffect(() => {
-    const hasRunningSyncs = syncLogs?.some(log => log.status === 'running');
-    setIsLiveUpdating(!!hasRunningSyncs);
-  }, [syncLogs]);
+  // Fetch real-time sync progress
+  const { data: syncProgress } = useQuery({
+    queryKey: ['sync-progress', currentSessionId],
+    queryFn: async () => {
+      if (!currentSessionId) return [];
+      const { data } = await supabase
+        .from('sync_progress')
+        .select('*')
+        .eq('sync_session_id', currentSessionId)
+        .order('updated_at', { ascending: false });
+      return data as SyncProgress[];
+    },
+    enabled: !!currentSessionId,
+    refetchInterval: 1000
+  });
+
+  // Check for running syncs
+  const hasRunningSyncs = syncLogs?.some(log => log.status === 'running');
 
   // Manual sync mutation
   const syncMutation = useMutation({
     mutationFn: async (syncType: string) => {
-      setIsLiveUpdating(true);
-      
       const response = await supabase.functions.invoke('riksdag-api-sync', {
         body: { type: syncType, manual: true }
       });
@@ -98,15 +121,17 @@ export const AdminPanel = () => {
     },
     onSuccess: (data) => {
       toast.success(`Synkronisering slutförd! ${data.totalProcessed} poster bearbetade.`);
+      setCurrentSessionId(data.sessionId);
       queryClient.invalidateQueries({ queryKey: ['sync-logs'] });
       queryClient.invalidateQueries({ queryKey: ['sync-configs'] });
-      setIsLiveUpdating(false);
-      setSyncProgress({});
     },
     onError: (error: any) => {
       toast.error(`Synkronisering misslyckades: ${error.message}`);
-      setIsLiveUpdating(false);
-      setSyncProgress({});
+      setCurrentSessionId(null);
+    },
+    onSettled: () => {
+      // Clear session after a delay to show final results
+      setTimeout(() => setCurrentSessionId(null), 10000);
     }
   });
 
@@ -161,14 +186,24 @@ export const AdminPanel = () => {
     }
   };
 
-  const getCurrentProgress = () => {
-    const runningSync = syncLogs?.find(log => log.status === 'running');
-    if (!runningSync) return 0;
-    
-    // Simulate progress based on time elapsed
-    const elapsed = Date.now() - new Date(runningSync.started_at).getTime();
-    const estimatedDuration = 120000; // 2 minutes estimate
-    return Math.min(95, (elapsed / estimatedDuration) * 100);
+  const getSyncTypeIcon = (syncType: string) => {
+    switch (syncType) {
+      case 'ledamoter':
+        return <Users className="h-4 w-4" />;
+      case 'anforanden':
+        return <FileText className="h-4 w-4" />;
+      case 'voteringar':
+        return <Vote className="h-4 w-4" />;
+      case 'dokument':
+        return <BookOpen className="h-4 w-4" />;
+      default:
+        return <Database className="h-4 w-4" />;
+    }
+  };
+
+  const getProgressPercentage = (progress: SyncProgress) => {
+    if (progress.total_records === 0) return 0;
+    return Math.round((progress.processed_records / progress.total_records) * 100);
   };
 
   if (configsLoading || logsLoading) {
@@ -191,9 +226,10 @@ export const AdminPanel = () => {
           <CardTitle className="flex items-center gap-2">
             <Settings className="h-5 w-5" />
             Riksdagens API - Adminpanel
-            {isLiveUpdating && (
+            {hasRunningSyncs && (
               <Badge variant="secondary" className="animate-pulse">
-                Live uppdatering aktiv
+                <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                Synkronisering pågår
               </Badge>
             )}
           </CardTitle>
@@ -201,8 +237,9 @@ export const AdminPanel = () => {
       </Card>
 
       <Tabs defaultValue="sync" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="sync">Manuell Synkronisering</TabsTrigger>
+          <TabsTrigger value="progress">Live Progress</TabsTrigger>
           <TabsTrigger value="config">Konfiguration</TabsTrigger>
           <TabsTrigger value="logs">Synkroniseringsloggar</TabsTrigger>
         </TabsList>
@@ -233,25 +270,15 @@ export const AdminPanel = () => {
                 </select>
               </div>
               
-              {syncMutation.isPending && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Synkronisering pågår...</span>
-                    <span>{Math.round(getCurrentProgress())}%</span>
-                  </div>
-                  <Progress value={getCurrentProgress()} className="w-full" />
-                </div>
-              )}
-              
               <Button
                 onClick={() => syncMutation.mutate(selectedSyncType)}
-                disabled={syncMutation.isPending}
+                disabled={syncMutation.isPending || hasRunningSyncs}
                 className="w-full"
               >
                 {syncMutation.isPending ? (
                   <>
                     <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Synkroniserar {selectedSyncType}...
+                    Startar synkronisering...
                   </>
                 ) : (
                   <>
@@ -260,8 +287,63 @@ export const AdminPanel = () => {
                   </>
                 )}
               </Button>
+
+              {syncMutation.isPending && (
+                <div className="text-sm text-gray-600">
+                  <p>Synkronisering har startats. Gå till "Live Progress" för att följa framstegen.</p>
+                </div>
+              )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="progress" className="space-y-4">
+          {syncProgress && syncProgress.length > 0 ? (
+            <div className="space-y-4">
+              {syncProgress.map((progress) => (
+                <Card key={progress.sync_type}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {getSyncTypeIcon(progress.sync_type)}
+                        <span className="capitalize">{progress.sync_type}</span>
+                      </div>
+                      <Badge className={getStatusColor(progress.current_status)}>
+                        {progress.current_status}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span>Framsteg: {progress.processed_records} / {progress.total_records}</span>
+                        <span>{getProgressPercentage(progress)}%</span>
+                      </div>
+                      <Progress value={getProgressPercentage(progress)} className="w-full" />
+                      {progress.failed_records > 0 && (
+                        <p className="text-sm text-red-600">
+                          {progress.failed_records} poster misslyckades
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Senast uppdaterad: {new Date(progress.updated_at).toLocaleString('sv-SE')}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="p-6 text-center">
+                <Activity className="h-8 w-8 mx-auto mb-4 text-gray-400" />
+                <p className="text-gray-600">Ingen aktiv synkronisering pågår</p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Starta en synkronisering för att se framstegen här
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="config" className="space-y-4">
@@ -269,7 +351,10 @@ export const AdminPanel = () => {
             <Card key={config.id}>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span className="capitalize">{config.sync_type}</span>
+                  <div className="flex items-center gap-2">
+                    {getSyncTypeIcon(config.sync_type)}
+                    <span className="capitalize">{config.sync_type}</span>
+                  </div>
                   <Switch
                     checked={config.enabled}
                     onCheckedChange={(enabled) => 
@@ -288,11 +373,9 @@ export const AdminPanel = () => {
                       value={config.sync_interval_hours}
                       onChange={(e) => {
                         const sync_interval_hours = parseInt(e.target.value);
-                        updateConfigMutation.mutate({ ...config, sync_interval_hours });
-                      }}
-                      onBlur={(e) => {
-                        const sync_interval_hours = parseInt(e.target.value);
-                        updateConfigMutation.mutate({ ...config, sync_interval_hours });
+                        if (sync_interval_hours > 0) {
+                          updateConfigMutation.mutate({ ...config, sync_interval_hours });
+                        }
                       }}
                     />
                   </div>
@@ -304,11 +387,9 @@ export const AdminPanel = () => {
                       value={config.max_records_per_batch}
                       onChange={(e) => {
                         const max_records_per_batch = parseInt(e.target.value);
-                        updateConfigMutation.mutate({ ...config, max_records_per_batch });
-                      }}
-                      onBlur={(e) => {
-                        const max_records_per_batch = parseInt(e.target.value);
-                        updateConfigMutation.mutate({ ...config, max_records_per_batch });
+                        if (max_records_per_batch > 0) {
+                          updateConfigMutation.mutate({ ...config, max_records_per_batch });
+                        }
                       }}
                     />
                   </div>
@@ -330,9 +411,6 @@ export const AdminPanel = () => {
               <CardTitle className="flex items-center gap-2">
                 <Activity className="h-5 w-5" />
                 Senaste synkroniseringar
-                {isLiveUpdating && (
-                  <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
-                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -342,7 +420,10 @@ export const AdminPanel = () => {
                     <div className="flex items-center gap-3">
                       {getStatusIcon(log.status)}
                       <div>
-                        <p className="font-medium capitalize">{log.sync_type}</p>
+                        <div className="flex items-center gap-2">
+                          {getSyncTypeIcon(log.sync_type)}
+                          <p className="font-medium capitalize">{log.sync_type}</p>
+                        </div>
                         <p className="text-sm text-gray-600">
                           Startad: {new Date(log.started_at).toLocaleString('sv-SE')}
                         </p>
@@ -351,16 +432,13 @@ export const AdminPanel = () => {
                             Slutförd: {new Date(log.completed_at).toLocaleString('sv-SE')}
                           </p>
                         )}
-                        {log.status === 'running' && (
-                          <div className="mt-2">
-                            <Progress value={getCurrentProgress()} className="w-32 h-2" />
-                          </div>
-                        )}
                       </div>
                     </div>
                     <div className="text-right">
                       <Badge className={getStatusColor(log.status)}>
-                        {log.status === 'running' ? 'Pågår' : log.status}
+                        {log.status === 'running' ? 'Pågår' : 
+                         log.status === 'completed' ? 'Klar' : 
+                         log.status === 'failed' ? 'Misslyckad' : log.status}
                       </Badge>
                       {log.records_processed > 0 && (
                         <p className="text-sm text-gray-600 mt-1">

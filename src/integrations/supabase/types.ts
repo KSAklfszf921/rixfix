@@ -11,11 +11,10 @@ export type Database = {
     Tables: {
       anforanden: {
         Row: {
-          anforande: string | null
           anforande_id: string
           anforandetyp: string | null
           created_at: string | null
-          dok_datum: string | null
+          datum: string | null
           dok_titel: string | null
           intressent_id: string | null
           kon: string | null
@@ -25,13 +24,13 @@ export type Database = {
           relaterat_dokument_url: string | null
           rubrik: string | null
           talare: string | null
+          text: string | null
         }
         Insert: {
-          anforande?: string | null
           anforande_id: string
           anforandetyp?: string | null
           created_at?: string | null
-          dok_datum?: string | null
+          datum?: string | null
           dok_titel?: string | null
           intressent_id?: string | null
           kon?: string | null
@@ -41,13 +40,13 @@ export type Database = {
           relaterat_dokument_url?: string | null
           rubrik?: string | null
           talare?: string | null
+          text?: string | null
         }
         Update: {
-          anforande?: string | null
           anforande_id?: string
           anforandetyp?: string | null
           created_at?: string | null
-          dok_datum?: string | null
+          datum?: string | null
           dok_titel?: string | null
           intressent_id?: string | null
           kon?: string | null
@@ -57,6 +56,7 @@ export type Database = {
           relaterat_dokument_url?: string | null
           rubrik?: string | null
           talare?: string | null
+          text?: string | null
         }
         Relationships: [
           {
@@ -154,37 +154,28 @@ export type Database = {
           adress: string | null
           created_at: string | null
           epost: string | null
-          id: number
-          iid: string | null
+          iid: string
           telefon: string | null
-          typ: string | null
-          uppgift: string | null
         }
         Insert: {
           adress?: string | null
           created_at?: string | null
           epost?: string | null
-          id?: number
-          iid?: string | null
+          iid: string
           telefon?: string | null
-          typ?: string | null
-          uppgift?: string | null
         }
         Update: {
           adress?: string | null
           created_at?: string | null
           epost?: string | null
-          id?: number
-          iid?: string | null
+          iid?: string
           telefon?: string | null
-          typ?: string | null
-          uppgift?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "kontaktuppgifter_iid_fkey"
             columns: ["iid"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "ledamoter"
             referencedColumns: ["iid"]
           },
@@ -192,9 +183,8 @@ export type Database = {
       }
       ledamoter: {
         Row: {
-          bild_url_192: string | null
-          bild_url_80: string | null
-          biografi_xml_url: string | null
+          bild_url: string | null
+          biografi_url: string | null
           created_at: string | null
           efternamn: string | null
           fodd_ar: number | null
@@ -208,9 +198,8 @@ export type Database = {
           webbplats_url: string | null
         }
         Insert: {
-          bild_url_192?: string | null
-          bild_url_80?: string | null
-          biografi_xml_url?: string | null
+          bild_url?: string | null
+          biografi_url?: string | null
           created_at?: string | null
           efternamn?: string | null
           fodd_ar?: number | null
@@ -224,9 +213,8 @@ export type Database = {
           webbplats_url?: string | null
         }
         Update: {
-          bild_url_192?: string | null
-          bild_url_80?: string | null
-          biografi_xml_url?: string | null
+          bild_url?: string | null
+          biografi_url?: string | null
           created_at?: string | null
           efternamn?: string | null
           fodd_ar?: number | null
@@ -303,38 +291,77 @@ export type Database = {
         }
         Relationships: []
       }
+      sync_progress: {
+        Row: {
+          completed_at: string | null
+          current_status: string | null
+          failed_records: number | null
+          id: number
+          processed_records: number | null
+          started_at: string | null
+          sync_session_id: string
+          sync_type: string
+          total_records: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          current_status?: string | null
+          failed_records?: number | null
+          id?: number
+          processed_records?: number | null
+          started_at?: string | null
+          sync_session_id: string
+          sync_type: string
+          total_records?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          current_status?: string | null
+          failed_records?: number | null
+          id?: number
+          processed_records?: number | null
+          started_at?: string | null
+          sync_session_id?: string
+          sync_type?: string
+          total_records?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       uppdrag: {
         Row: {
           created_at: string | null
-          from_date: string | null
+          from_datum: string | null
           id: number
           iid: string | null
           organ: string | null
           roll: string | null
           status: string | null
-          tom_date: string | null
+          tom_datum: string | null
           typ: string | null
         }
         Insert: {
           created_at?: string | null
-          from_date?: string | null
+          from_datum?: string | null
           id?: number
           iid?: string | null
           organ?: string | null
           roll?: string | null
           status?: string | null
-          tom_date?: string | null
+          tom_datum?: string | null
           typ?: string | null
         }
         Update: {
           created_at?: string | null
-          from_date?: string | null
+          from_datum?: string | null
           id?: number
           iid?: string | null
           organ?: string | null
           roll?: string | null
           status?: string | null
-          tom_date?: string | null
+          tom_datum?: string | null
           typ?: string | null
         }
         Relationships: [
