@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { 
   Settings, 
@@ -44,6 +45,8 @@ interface SyncLog {
 
 export const AdminPanel = () => {
   const [selectedSyncType, setSelectedSyncType] = useState<string>("all");
+  const [syncProgress, setSyncProgress] = useState<{[key: string]: number}>({});
+  const [isLiveUpdating, setIsLiveUpdating] = useState(false);
   const queryClient = useQueryClient();
 
   // Fetch sync configurations
@@ -58,7 +61,7 @@ export const AdminPanel = () => {
     }
   });
 
-  // Fetch sync logs
+  // Fetch sync logs with auto-refresh during sync
   const { data: syncLogs, isLoading: logsLoading } = useQuery({
     queryKey: ['sync-logs'],
     queryFn: async () => {
@@ -68,12 +71,21 @@ export const AdminPanel = () => {
         .order('started_at', { ascending: false })
         .limit(20);
       return data as SyncLog[];
-    }
+    },
+    refetchInterval: isLiveUpdating ? 2000 : false
   });
+
+  // Check for running syncs and enable live updates
+  useEffect(() => {
+    const hasRunningSyncs = syncLogs?.some(log => log.status === 'running');
+    setIsLiveUpdating(!!hasRunningSyncs);
+  }, [syncLogs]);
 
   // Manual sync mutation
   const syncMutation = useMutation({
     mutationFn: async (syncType: string) => {
+      setIsLiveUpdating(true);
+      
       const response = await supabase.functions.invoke('riksdag-api-sync', {
         body: { type: syncType, manual: true }
       });
@@ -88,9 +100,13 @@ export const AdminPanel = () => {
       toast.success(`Synkronisering slutförd! ${data.totalProcessed} poster bearbetade.`);
       queryClient.invalidateQueries({ queryKey: ['sync-logs'] });
       queryClient.invalidateQueries({ queryKey: ['sync-configs'] });
+      setIsLiveUpdating(false);
+      setSyncProgress({});
     },
     onError: (error: any) => {
       toast.error(`Synkronisering misslyckades: ${error.message}`);
+      setIsLiveUpdating(false);
+      setSyncProgress({});
     }
   });
 
@@ -145,6 +161,16 @@ export const AdminPanel = () => {
     }
   };
 
+  const getCurrentProgress = () => {
+    const runningSync = syncLogs?.find(log => log.status === 'running');
+    if (!runningSync) return 0;
+    
+    // Simulate progress based on time elapsed
+    const elapsed = Date.now() - new Date(runningSync.started_at).getTime();
+    const estimatedDuration = 120000; // 2 minutes estimate
+    return Math.min(95, (elapsed / estimatedDuration) * 100);
+  };
+
   if (configsLoading || logsLoading) {
     return (
       <Card>
@@ -165,6 +191,11 @@ export const AdminPanel = () => {
           <CardTitle className="flex items-center gap-2">
             <Settings className="h-5 w-5" />
             Riksdagens API - Adminpanel
+            {isLiveUpdating && (
+              <Badge variant="secondary" className="animate-pulse">
+                Live uppdatering aktiv
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
       </Card>
@@ -192,6 +223,7 @@ export const AdminPanel = () => {
                   value={selectedSyncType}
                   onChange={(e) => setSelectedSyncType(e.target.value)}
                   className="px-3 py-2 border rounded-md"
+                  disabled={syncMutation.isPending}
                 >
                   <option value="all">Alla datatyper</option>
                   <option value="ledamoter">Ledamöter</option>
@@ -201,6 +233,16 @@ export const AdminPanel = () => {
                 </select>
               </div>
               
+              {syncMutation.isPending && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>Synkronisering pågår...</span>
+                    <span>{Math.round(getCurrentProgress())}%</span>
+                  </div>
+                  <Progress value={getCurrentProgress()} className="w-full" />
+                </div>
+              )}
+              
               <Button
                 onClick={() => syncMutation.mutate(selectedSyncType)}
                 disabled={syncMutation.isPending}
@@ -209,7 +251,7 @@ export const AdminPanel = () => {
                 {syncMutation.isPending ? (
                   <>
                     <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Synkroniserar...
+                    Synkroniserar {selectedSyncType}...
                   </>
                 ) : (
                   <>
@@ -248,6 +290,10 @@ export const AdminPanel = () => {
                         const sync_interval_hours = parseInt(e.target.value);
                         updateConfigMutation.mutate({ ...config, sync_interval_hours });
                       }}
+                      onBlur={(e) => {
+                        const sync_interval_hours = parseInt(e.target.value);
+                        updateConfigMutation.mutate({ ...config, sync_interval_hours });
+                      }}
                     />
                   </div>
                   <div>
@@ -257,6 +303,10 @@ export const AdminPanel = () => {
                       type="number"
                       value={config.max_records_per_batch}
                       onChange={(e) => {
+                        const max_records_per_batch = parseInt(e.target.value);
+                        updateConfigMutation.mutate({ ...config, max_records_per_batch });
+                      }}
+                      onBlur={(e) => {
                         const max_records_per_batch = parseInt(e.target.value);
                         updateConfigMutation.mutate({ ...config, max_records_per_batch });
                       }}
@@ -280,6 +330,9 @@ export const AdminPanel = () => {
               <CardTitle className="flex items-center gap-2">
                 <Activity className="h-5 w-5" />
                 Senaste synkroniseringar
+                {isLiveUpdating && (
+                  <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -298,11 +351,16 @@ export const AdminPanel = () => {
                             Slutförd: {new Date(log.completed_at).toLocaleString('sv-SE')}
                           </p>
                         )}
+                        {log.status === 'running' && (
+                          <div className="mt-2">
+                            <Progress value={getCurrentProgress()} className="w-32 h-2" />
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
                       <Badge className={getStatusColor(log.status)}>
-                        {log.status}
+                        {log.status === 'running' ? 'Pågår' : log.status}
                       </Badge>
                       {log.records_processed > 0 && (
                         <p className="text-sm text-gray-600 mt-1">

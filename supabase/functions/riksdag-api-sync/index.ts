@@ -38,11 +38,17 @@ class RiksdagApiService {
     this.supabase = supabaseClient;
   }
 
-  async fetchWithRetry(url: string, maxRetries = 3, delay = 1000): Promise<Response> {
+  async fetchWithRetry(url: string, maxRetries = 3, delay = 2000): Promise<Response> {
     for (let i = 0; i < maxRetries; i++) {
       try {
         console.log(`Fetching: ${url} (attempt ${i + 1}/${maxRetries})`);
-        const response = await fetch(url);
+        
+        const response = await fetch(url, {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'Riksdagskoll/1.0'
+          }
+        });
         
         if (response.status === 429) {
           console.log('Rate limited, waiting before retry...');
@@ -52,6 +58,16 @@ class RiksdagApiService {
         
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        // Check if response is actually JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          console.log(`Warning: Response content-type is ${contentType}, expected JSON`);
+          const text = await response.text();
+          if (text.startsWith('<')) {
+            throw new Error('Received XML response instead of JSON');
+          }
         }
         
         return response;
@@ -94,6 +110,11 @@ class RiksdagApiService {
           }, { onConflict: 'iid' });
         
         processed++;
+        
+        // Progress update every 10 records
+        if (processed % 10 === 0) {
+          console.log(`Processed ${processed}/${personer.length} ledamöter`);
+        }
       } catch (error) {
         console.error(`Error processing person ${person.intressent_id}:`, error);
       }
@@ -108,7 +129,7 @@ class RiksdagApiService {
     
     const fromDate = config.last_sync_date 
       ? new Date(config.last_sync_date).toISOString().split('T')[0]
-      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 7 days ago default
+      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     const url = `${this.baseUrl}/anforandelista/?format=json&from=${fromDate}&tom=${new Date().toISOString().split('T')[0]}`;
     
@@ -144,7 +165,7 @@ class RiksdagApiService {
           .upsert(processedBatch, { onConflict: 'anforande_id' });
         
         processed += batch.length;
-        console.log(`Processed batch ${Math.floor(i / config.max_records_per_batch) + 1}, total: ${processed}`);
+        console.log(`Processed batch ${Math.floor(i / config.max_records_per_batch) + 1}, total: ${processed}/${anforanden.length}`);
       } catch (error) {
         console.error(`Error processing anföranden batch:`, error);
       }
@@ -187,6 +208,10 @@ class RiksdagApiService {
           }, { onConflict: 'votering_id,intressent_id' });
         
         processed++;
+        
+        if (processed % 50 === 0) {
+          console.log(`Processed ${processed}/${voteringar.length} voteringar`);
+        }
       } catch (error) {
         console.error(`Error processing votering ${votering.votering_id}:`, error);
       }
@@ -232,6 +257,10 @@ class RiksdagApiService {
           }, { onConflict: 'dok_id' });
         
         processed++;
+        
+        if (processed % 25 === 0) {
+          console.log(`Processed ${processed}/${dokument.length} dokument`);
+        }
       } catch (error) {
         console.error(`Error processing dokument ${dok.dok_id}:`, error);
       }
@@ -274,9 +303,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const url = new URL(req.url);
-    const syncType = url.searchParams.get('type') || 'all';
-    const manual = url.searchParams.get('manual') === 'true';
+    const { type: syncType = 'all', manual = false } = await req.json().catch(() => ({}));
 
     console.log(`Starting sync for type: ${syncType}, manual: ${manual}`);
 
