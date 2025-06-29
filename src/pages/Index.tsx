@@ -14,7 +14,11 @@ import {
   MessageSquare,
   BarChart3,
   Search,
-  Zap
+  Zap,
+  Target,
+  TrendingUp,
+  Shield,
+  Cpu
 } from "lucide-react";
 
 const Index = () => {
@@ -27,20 +31,24 @@ const Index = () => {
             Riksdagskoll
           </h1>
           <p className="text-xl text-gray-600 mb-6">
-            Utforska Sveriges riksdag genom öppen data
+            Strategisk datahämtning och utforskning av Sveriges riksdag
           </p>
           <div className="flex justify-center gap-2 flex-wrap">
             <Badge variant="outline" className="flex items-center gap-1">
-              <Database className="h-3 w-3" />
-              Riksdagens öppna data
+              <Target className="h-3 w-3" />
+              Strategisk hämtning
             </Badge>
             <Badge variant="outline" className="flex items-center gap-1">
-              <Zap className="h-3 w-3" />
-              Realtidsuppdateringar
+              <Cpu className="h-3 w-3" />
+              Intelligent batching
             </Badge>
             <Badge variant="outline" className="flex items-center gap-1">
-              <Search className="h-3 w-3" />
-              Avancerad sökning
+              <Shield className="h-3 w-3" />
+              Automatisk felhantering
+            </Badge>
+            <Badge variant="outline" className="flex items-center gap-1">
+              <TrendingUp className="h-3 w-3" />
+              Real-time övervakning
             </Badge>
           </div>
         </div>
@@ -49,8 +57,8 @@ const Index = () => {
         <Tabs defaultValue="explorer" className="w-full">
           <TabsList className="grid w-full grid-cols-6 mb-8">
             <TabsTrigger value="explorer" className="flex items-center gap-2">
-              <Database className="h-4 w-4" />
-              API Explorer
+              <Zap className="h-4 w-4" />
+              Strategisk Explorer
             </TabsTrigger>
             <TabsTrigger value="members" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
@@ -78,14 +86,45 @@ const Index = () => {
             <Card className="mb-6">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5" />
-                  Interaktiv API-explorer och Batch-hämtning
+                  <Target className="h-5 w-5" />
+                  Strategisk Datahämtning & API Explorer
                 </CardTitle>
                 <CardDescription>
-                  Konfigurera, förhandsgranska och kör batch-hämtningar från Riksdagens öppna data API. 
-                  Testa olika filter och se resultatet innan du hämtar data.
+                  Genomför komplett strategisk datahämtning med intelligent batch-optimering, 
+                  automatisk fasindelning och real-time övervakning av hela processen.
                 </CardDescription>
               </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Target className="h-5 w-5 text-blue-600" />
+                      <h3 className="font-semibold text-blue-900">Strategisk Plan</h3>
+                    </div>
+                    <p className="text-sm text-blue-800">
+                      Automatisk hämtning i optimal ordning: Ledamöter → Utskott → Dokument → Anföranden → Voteringar
+                    </p>
+                  </div>
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Cpu className="h-5 w-5 text-green-600" />
+                      <h3 className="font-semibold text-green-900">Intelligent Batching</h3>
+                    </div>
+                    <p className="text-sm text-green-800">
+                      Dynamisk anpassning av batch-storlek baserat på responstid och API-prestanda
+                    </p>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Shield className="h-5 w-5 text-purple-600" />
+                      <h3 className="font-semibold text-purple-900">Robust Felhantering</h3>
+                    </div>
+                    <p className="text-sm text-purple-800">
+                      Automatisk retry med exponential backoff, rate limiting och intelligenta felåterställningar
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
             </Card>
             <BatchExplorer />
           </TabsContent>

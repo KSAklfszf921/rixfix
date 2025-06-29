@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { StrategicPlanManager } from "@/components/StrategicPlanManager";
 import { 
   Play, 
   Eye, 
@@ -23,7 +24,9 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
-  RefreshCw
+  RefreshCw,
+  Target,
+  Zap
 } from "lucide-react";
 
 interface BatchConfig {
@@ -39,6 +42,12 @@ interface PreviewResult {
   estimatedBatch: number;
   currentOffset: number;
   filters: Record<string, string>;
+  phaseInfo?: {
+    priority: number;
+    maxBatchSize: number;
+    defaultBatchSize: number;
+    estimatedTotal: number;
+  };
 }
 
 export const BatchExplorer = () => {
@@ -85,7 +94,7 @@ export const BatchExplorer = () => {
         .from('api_sync_log')
         .select('*')
         .order('started_at', { ascending: false })
-        .limit(10);
+        .limit(15);
       return data || [];
     },
     refetchInterval: isRunning ? 3000 : false
@@ -151,7 +160,7 @@ export const BatchExplorer = () => {
 
       toast({
         title: "Batch-hämtning slutförd",
-        description: `Hämtade ${data.recordsProcessed} poster för ${config.syncType}.`,
+        description: `Hämtade ${data.recordsProcessed} poster för ${config.syncType}. ${data.isComplete ? 'Fas komplett!' : 'Fler data tillgängliga.'}`,
       });
 
       await queryClient.invalidateQueries({ queryKey: ['batch-history'] });
@@ -319,31 +328,68 @@ export const BatchExplorer = () => {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            Avancerad Batch-hämtningsexplorer
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="configure" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="configure" className="flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                Konfigurera
-              </TabsTrigger>
-              <TabsTrigger value="preview" className="flex items-center gap-2">
-                <Eye className="h-4 w-4" />
-                Förhandsvisning
-              </TabsTrigger>
-              <TabsTrigger value="history" className="flex items-center gap-2">
-                <History className="h-4 w-4" />
-                Historik
-              </TabsTrigger>
-            </TabsList>
+      <Tabs defaultValue="strategic" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="strategic" className="flex items-center gap-2">
+            <Target className="h-4 w-4" />
+            Strategisk Plan
+          </TabsTrigger>
+          <TabsTrigger value="configure" className="flex items-center gap-2">
+            <Settings className="h-4 w-4" />
+            Konfigurera
+          </TabsTrigger>
+          <TabsTrigger value="preview" className="flex items-center gap-2">
+            <Eye className="h-4 w-4" />
+            Förhandsvisning
+          </TabsTrigger>
+          <TabsTrigger value="history" className="flex items-center gap-2">
+            <History className="h-4 w-4" />
+            Historik
+          </TabsTrigger>
+        </TabsList>
 
-            <TabsContent value="configure" className="space-y-4">
+        <TabsContent value="strategic">
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Target className="h-5 w-5" />
+                Strategisk Datahämtningsplan
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start gap-3">
+                  <Zap className="h-5 w-5 text-blue-600 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-blue-900 mb-2">Intelligent Batch-hämtning</h4>
+                    <p className="text-blue-800 text-sm mb-3">
+                      Detta verktyg kör en optimerad sekvens för att hämta all Riksdagsdata i rätt ordning med 
+                      intelligent anpassning av batch-storlek och automatisk felhantering.
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                      <div className="bg-blue-100 px-2 py-1 rounded">1. Ledamöter (500st)</div>
+                      <div className="bg-blue-100 px-2 py-1 rounded">2. Utskott (100st)</div>
+                      <div className="bg-blue-100 px-2 py-1 rounded">3. Dokument (2000st)</div>
+                      <div className="bg-blue-100 px-2 py-1 rounded">4. Anföranden (1500st)</div>
+                      <div className="bg-blue-100 px-2 py-1 rounded">5. Voteringar (3000st)</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <StrategicPlanManager />
+        </TabsContent>
+
+        <TabsContent value="configure" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Settings className="h-5 w-5" />
+                Batch-konfiguration
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="syncType">Datatyp</Label>
@@ -356,8 +402,9 @@ export const BatchExplorer = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="members">Ledamöter</SelectItem>
-                      <SelectItem value="debates">Anföranden</SelectItem>
+                      <SelectItem value="committees">Utskott</SelectItem>
                       <SelectItem value="documents">Dokument</SelectItem>
+                      <SelectItem value="debates">Anföranden</SelectItem>
                       <SelectItem value="votes">Voteringar</SelectItem>
                     </SelectContent>
                   </Select>
@@ -377,6 +424,7 @@ export const BatchExplorer = () => {
                       <SelectItem value="25">25</SelectItem>
                       <SelectItem value="50">50</SelectItem>
                       <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="200">200</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -399,17 +447,29 @@ export const BatchExplorer = () => {
                   <div className="bg-muted p-4 rounded-lg">
                     <h4 className="font-medium mb-2">Aktuell synkroniseringsstatus</h4>
                     <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>Hämtade poster: {syncState.total_fetched || 0}</div>
+                      <div>Hämtade poster: {syncState.total_fetched?.toLocaleString() || 0}</div>
                       <div>Senaste offset: {syncState.last_offset || 0}</div>
                       <div>Status: {syncState.is_complete ? 'Komplett' : 'Pågående'}</div>
                       <div>Senaste sync: {syncState.last_sync_date ? new Date(syncState.last_sync_date).toLocaleString('sv-SE') : 'Aldrig'}</div>
                     </div>
+                    {syncState.last_error && (
+                      <div className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded">
+                        Senaste fel: {syncState.last_error}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
-            </TabsContent>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            <TabsContent value="preview" className="space-y-4">
+        <TabsContent value="preview" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Förhandsvisning och Körning</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex gap-2">
                 <Button onClick={handlePreview} disabled={isRunning}>
                   <Eye className="h-4 w-4 mr-2" />
@@ -436,7 +496,7 @@ export const BatchExplorer = () => {
               {preview && (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Förhandsvisning av API-anrop</CardTitle>
+                    <CardTitle>API-anrop förhandsvisning</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div>
@@ -447,7 +507,7 @@ export const BatchExplorer = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label>Uppskattad batchstorlek:</Label>
+                        <Label>Batchstorlek:</Label>
                         <p className="font-mono">{preview.estimatedBatch}</p>
                       </div>
                       <div>
@@ -455,6 +515,19 @@ export const BatchExplorer = () => {
                         <p className="font-mono">{preview.currentOffset}</p>
                       </div>
                     </div>
+                    
+                    {preview.phaseInfo && (
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <Label className="text-blue-900">Fas-information:</Label>
+                        <div className="grid grid-cols-2 gap-2 mt-2 text-sm text-blue-800">
+                          <div>Prioritet: {preview.phaseInfo.priority}</div>
+                          <div>Max batch: {preview.phaseInfo.maxBatchSize}</div>
+                          <div>Beräknat total: {preview.phaseInfo.estimatedTotal.toLocaleString()}</div>
+                          <div>Standard batch: {preview.phaseInfo.defaultBatchSize}</div>
+                        </div>
+                      </div>
+                    )}
+                    
                     {Object.keys(preview.filters).length > 0 && (
                       <div>
                         <Label>Aktiva filter:</Label>
@@ -470,9 +543,16 @@ export const BatchExplorer = () => {
                   </CardContent>
                 </Card>
               )}
-            </TabsContent>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            <TabsContent value="history" className="space-y-4">
+        <TabsContent value="history" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Batch-historik</CardTitle>
+            </CardHeader>
+            <CardContent>
               <div className="space-y-3">
                 {batchHistory?.map((log) => (
                   <Card key={log.id}>
@@ -492,7 +572,7 @@ export const BatchExplorer = () => {
                               )}
                             </div>
                             {log.error_message && (
-                              <div className="text-sm text-red-600 mt-1">
+                              <div className="text-sm text-red-600 mt-1 bg-red-50 p-1 rounded">
                                 {log.error_message}
                               </div>
                             )}
@@ -526,10 +606,10 @@ export const BatchExplorer = () => {
                   </div>
                 )}
               </div>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
