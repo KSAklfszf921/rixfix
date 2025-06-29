@@ -68,6 +68,39 @@ export type Database = {
           },
         ]
       }
+      api_sync_log: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: number
+          records_processed: number | null
+          started_at: string | null
+          status: string | null
+          sync_type: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: number
+          records_processed?: number | null
+          started_at?: string | null
+          status?: string | null
+          sync_type: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: number
+          records_processed?: number | null
+          started_at?: string | null
+          status?: string | null
+          sync_type?: string
+        }
+        Relationships: []
+      }
       dokument: {
         Row: {
           created_at: string | null
@@ -237,6 +270,39 @@ export type Database = {
           },
         ]
       }
+      sync_config: {
+        Row: {
+          created_at: string | null
+          enabled: boolean | null
+          id: number
+          last_sync_date: string | null
+          max_records_per_batch: number | null
+          sync_interval_hours: number | null
+          sync_type: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: number
+          last_sync_date?: string | null
+          max_records_per_batch?: number | null
+          sync_interval_hours?: number | null
+          sync_type: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: number
+          last_sync_date?: string | null
+          max_records_per_batch?: number | null
+          sync_interval_hours?: number | null
+          sync_type?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       uppdrag: {
         Row: {
           created_at: string | null
@@ -340,10 +406,41 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      mv_monthly_activity: {
+        Row: {
+          antal_anforanden: number | null
+          antal_partier: number | null
+          antal_talare: number | null
+          manad: string | null
+        }
+        Relationships: []
+      }
+      mv_parti_stats: {
+        Row: {
+          antal_talare: number | null
+          ar: number | null
+          forsta_anforande: string | null
+          parti: string | null
+          senaste_anforande: string | null
+          totalt_antal_anforanden: number | null
+        }
+        Relationships: []
+      }
+      mv_voting_stats: {
+        Row: {
+          antal: number | null
+          ar: number | null
+          parti: string | null
+          rost: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      refresh_materialized_views: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
