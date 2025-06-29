@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { StrategicPlanManager } from "@/components/StrategicPlanManager";
+import { ApiHealthMonitor } from "@/components/ApiHealthMonitor";
 import { 
   Play, 
   Eye, 
@@ -26,7 +26,8 @@ import {
   Clock,
   RefreshCw,
   Target,
-  Zap
+  Zap,
+  Shield
 } from "lucide-react";
 
 interface BatchConfig {
@@ -329,10 +330,14 @@ export const BatchExplorer = () => {
   return (
     <div className="space-y-6">
       <Tabs defaultValue="strategic" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="strategic" className="flex items-center gap-2">
             <Target className="h-4 w-4" />
             Strategisk Plan
+          </TabsTrigger>
+          <TabsTrigger value="health" className="flex items-center gap-2">
+            <Shield className="h-4 w-4" />
+            API Hälsa
           </TabsTrigger>
           <TabsTrigger value="configure" className="flex items-center gap-2">
             <Settings className="h-4 w-4" />
@@ -379,6 +384,10 @@ export const BatchExplorer = () => {
             </CardContent>
           </Card>
           <StrategicPlanManager />
+        </TabsContent>
+
+        <TabsContent value="health">
+          <ApiHealthMonitor />
         </TabsContent>
 
         <TabsContent value="configure" className="space-y-4">
