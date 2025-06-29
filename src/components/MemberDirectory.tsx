@@ -1,7 +1,6 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,22 +9,25 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Users, MapPin, Eye, UserCheck, Calendar } from "lucide-react";
+import { MemberProfileModal } from "./MemberProfileModal";
 
 export const MemberDirectory = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedParty, setSelectedParty] = useState<string>("all");
   const [showAll, setShowAll] = useState(false);
-  const navigate = useNavigate();
+  const [selectedMemberIid, setSelectedMemberIid] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const statusFilter = showAll ? undefined : 'Tjänstgörande riksdagsledamot';
 
   const { data: members, isLoading } = useQuery({
     queryKey: ['members', searchTerm, selectedParty, statusFilter],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       let query = supabase
         .from('ledamoter')
         .select('*')
-        .order('efternamn', { ascending: true });
+        .order('efternamn', { ascending: true })
+        .abortSignal(signal);
 
       if (statusFilter) {
         query = query.eq('status', statusFilter);
@@ -46,11 +48,12 @@ export const MemberDirectory = () => {
 
   const { data: parties } = useQuery({
     queryKey: ['parties'],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data } = await supabase
         .from('ledamoter')
         .select('parti')
-        .not('parti', 'is', null);
+        .not('parti', 'is', null)
+        .abortSignal(signal);
       
       const uniqueParties = [...new Set(data?.map(p => p.parti))].filter(Boolean);
       return uniqueParties.sort();
@@ -72,7 +75,8 @@ export const MemberDirectory = () => {
   };
 
   const handleMemberClick = (iid: string) => {
-    navigate(`/ledamot/${iid}`);
+    setSelectedMemberIid(iid);
+    setIsModalOpen(true);
   };
 
   const activeCount = members?.filter(m => m.status === 'Tjänstgörande riksdagsledamot').length || 0;
@@ -92,126 +96,134 @@ export const MemberDirectory = () => {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Riksdagsledamöter
-            <Badge variant="outline" className="ml-2">
-              {showAll ? `${totalCount} totalt` : `${activeCount} aktiva`}
-            </Badge>
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            <Button
-              variant={showAll ? "outline" : "default"}
-              size="sm"
-              onClick={() => setShowAll(false)}
-              className="flex items-center gap-1"
-            >
-              <UserCheck className="h-3 w-3" />
-              Aktiva
-            </Button>
-            <Button
-              variant={showAll ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowAll(true)}
-              className="flex items-center gap-1"
-            >
-              <Calendar className="h-3 w-3" />
-              Alla
-            </Button>
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Riksdagsledamöter
+              <Badge variant="outline" className="ml-2">
+                {showAll ? `${totalCount} totalt` : `${activeCount} aktiva`}
+              </Badge>
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Button
+                variant={showAll ? "outline" : "default"}
+                size="sm"
+                onClick={() => setShowAll(false)}
+                className="flex items-center gap-1"
+              >
+                <UserCheck className="h-3 w-3" />
+                Aktiva
+              </Button>
+              <Button
+                variant={showAll ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowAll(true)}
+                className="flex items-center gap-1"
+              >
+                <Calendar className="h-3 w-3" />
+                Alla
+              </Button>
+            </div>
           </div>
-        </div>
-        
-        <div className="flex flex-col sm:flex-row gap-4 mt-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Sök ledamot..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
+          
+          <div className="flex flex-col sm:flex-row gap-4 mt-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Sök ledamot..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Select value={selectedParty} onValueChange={setSelectedParty}>
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <SelectValue placeholder="Välj parti" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla partier</SelectItem>
+                {parties?.map((party) => (
+                  <SelectItem key={party} value={party}>
+                    {party}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <Select value={selectedParty} onValueChange={setSelectedParty}>
-            <SelectTrigger className="w-full sm:w-[200px]">
-              <SelectValue placeholder="Välj parti" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla partier</SelectItem>
-              {parties?.map((party) => (
-                <SelectItem key={party} value={party}>
-                  {party}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {members?.map((member) => (
-            <div 
-              key={member.iid} 
-              className="border rounded-lg p-6 hover:shadow-lg transition-all duration-200 cursor-pointer hover:border-blue-300 group"
-              onClick={() => handleMemberClick(member.iid)}
-            >
-              <div className="flex items-start space-x-4">
-                <Avatar className="h-16 w-16 border-2 border-gray-200 group-hover:border-blue-300 transition-colors">
-                  <AvatarImage 
-                    src={member.bild_url || undefined} 
-                    alt={`${member.tilltalsnamn} ${member.efternamn}`}
-                    className="object-cover"
-                  />
-                  <AvatarFallback className="bg-blue-100 text-blue-800 text-lg font-semibold">
-                    {member.tilltalsnamn?.[0]}{member.efternamn?.[0]}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors text-lg">
-                    {member.tilltalsnamn} {member.efternamn}
-                  </h3>
-                  <div className="flex items-center gap-2 mt-2">
-                    {member.parti && (
-                      <Badge className={`${getPartyColor(member.parti)} font-medium`}>
-                        {member.parti}
-                      </Badge>
-                    )}
-                    {member.status !== 'Tjänstgörande riksdagsledamot' && (
-                      <Badge variant="secondary" className="text-xs">
-                        Tidigare
-                      </Badge>
-                    )}
-                  </div>
-                  {member.valkrets && (
-                    <div className="flex items-center gap-1 mt-3 text-sm text-gray-600">
-                      <MapPin className="h-3 w-3" />
-                      <span className="truncate">{member.valkrets}</span>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {members?.map((member) => (
+              <div 
+                key={member.iid} 
+                className="border rounded-lg p-6 hover:shadow-lg transition-all duration-200 cursor-pointer hover:border-blue-300 group"
+                onClick={() => handleMemberClick(member.iid)}
+              >
+                <div className="flex items-start space-x-4">
+                  <Avatar className="h-16 w-16 border-2 border-gray-200 group-hover:border-blue-300 transition-colors">
+                    <AvatarImage 
+                      src={member.bild_url || undefined} 
+                      alt={`${member.tilltalsnamn} ${member.efternamn}`}
+                      className="object-cover"
+                    />
+                    <AvatarFallback className="bg-blue-100 text-blue-800 text-lg font-semibold">
+                      {member.tilltalsnamn?.[0]}{member.efternamn?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors text-lg">
+                      {member.tilltalsnamn} {member.efternamn}
+                    </h3>
+                    <div className="flex items-center gap-2 mt-2">
+                      {member.parti && (
+                        <Badge className={`${getPartyColor(member.parti)} font-medium`}>
+                          {member.parti}
+                        </Badge>
+                      )}
+                      {member.status !== 'Tjänstgörande riksdagsledamot' && (
+                        <Badge variant="secondary" className="text-xs">
+                          Tidigare
+                        </Badge>
+                      )}
                     </div>
-                  )}
-                  <div className="flex items-center justify-between mt-4">
-                    {member.fodd_ar && (
-                      <p className="text-sm text-gray-500">
-                        Född: {member.fodd_ar}
-                      </p>
+                    {member.valkrets && (
+                      <div className="flex items-center gap-1 mt-3 text-sm text-gray-600">
+                        <MapPin className="h-3 w-3" />
+                        <span className="truncate">{member.valkrets}</span>
+                      </div>
                     )}
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Eye className="h-4 w-4 text-blue-600" />
+                    <div className="flex items-center justify-between mt-4">
+                      {member.fodd_ar && (
+                        <p className="text-sm text-gray-500">
+                          Född: {member.fodd_ar}
+                        </p>
+                      )}
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Eye className="h-4 w-4 text-blue-600" />
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-        {members?.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            <Users className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-            <p className="text-lg">Inga ledamöter hittades för din sökning.</p>
+            ))}
           </div>
-        )}
-      </CardContent>
-    </Card>
+          {members?.length === 0 && (
+            <div className="text-center py-12 text-gray-500">
+              <Users className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+              <p className="text-lg">Inga ledamöter hittades för din sökning.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <MemberProfileModal 
+        iid={selectedMemberIid}
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+      />
+    </>
   );
 };
